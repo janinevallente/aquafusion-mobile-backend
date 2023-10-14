@@ -6,9 +6,11 @@ import android.os.Bundle
 import android.util.Log
 import android.util.Patterns
 import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
 import com.aquafusion.crudtemplate_v2.databinding.ActivityMainBinding
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.gson.Gson
 
 // KTor backend HTTP client
 
@@ -23,6 +25,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationStrategy
@@ -43,7 +46,7 @@ class MainActivity : AppCompatActivity() {
         val password: String,
         val fullName: String,
         val workgroupId: String
-        );
+    );
 
     @Serializable
     private data class FarmerLoginCredentials(
@@ -53,38 +56,34 @@ class MainActivity : AppCompatActivity() {
 
     // client object
     private val client = HttpClient(CIO) {
-        install(ContentNegotiation){
-            json(
-                Json {
-                    prettyPrint = true
-                    isLenient = true
-                }
-            )
-        }
-
         install(UserAgent) {
             agent = "Ktor client"
         }
     }
 
     // call firebase login
-    private suspend fun callFirebaseLogin(emailAddress: String, password: String) {
+    private suspend fun callFirebaseLogin(emailAddress: String, password: String): Boolean {
         try {
-            val json = Json.encodeToJsonElement(FarmerLoginCredentials(emailAddress, password))
+            val json = Gson().toJson(FarmerLoginCredentials(emailAddress, password))
 
             val response: HttpResponse = client.post("https://us-central1-aquafusion-b8744.cloudfunctions.net/api/farmer/login") {
                 contentType(ContentType.Application.Json)
                 setBody(json);
             }
             // Handle the response accordingly
-            Toast.makeText(this@MainActivity, response.toString(), Toast.LENGTH_LONG);
-            Log.d("API Response", response.toString())
+            Toast.makeText(this@MainActivity, response.toString(), Toast.LENGTH_LONG).show();
+            val responseData = response.bodyAsText();
+            Log.d("API Response", responseData);
+            Log.d("client:", response.isActive.toString());
+
+            return true;
         } catch (e: Exception) {
             // Handle the error
             Log.e("API Error", "Error: ${e.localizedMessage}")
         } finally {
             client.close()
         }
+        return false
     }
 
     // End KTor
@@ -100,14 +99,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun login() {
+    private fun login() {
         val emailAddress: String = binding.emailAddressText.text.toString().trim()
         val password: String = binding.passwordText.text.toString().trim()
 
         if (emailAddress.isNotEmpty() && Patterns.EMAIL_ADDRESS.matcher(emailAddress).matches()) {
             if (password.isNotEmpty()) {
                 // Call the login function with provided email and password
-                callFirebaseLogin(emailAddress, password)
+                lifecycleScope.launch(Dispatchers.Main) {
+                    callFirebaseLogin(emailAddress, password);
+                }
             } else {
                 binding.passwordText.error = "Please enter your password"
             }
@@ -127,9 +128,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.loginButton.setOnClickListener {
             // Launch a coroutine to call login()
-            GlobalScope.launch(Dispatchers.Main) {
-                login()
-            }
+            login()
         }
 
         // Register button click event
